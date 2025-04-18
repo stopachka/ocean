@@ -1,5 +1,7 @@
 // src/app/index.tsx
-import React from "react";
+"use client";
+
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -21,26 +23,79 @@ import Animated, {
 import * as Haptics from "expo-haptics";
 import clientDB from "@/clientDB";
 
+/* ------------------------------------------------------------------ */
+/*                 1. room + presence type + hooks                    */
+/* ------------------------------------------------------------------ */
+
+type TouchPresence = { x: number; y: number; pressed: boolean };
+
+// make sure `instant.schema.ts` has:
+//
+// rooms: {
+//   touch: {
+//     presence: i.entity({
+//       x: i.number(),
+//       y: i.number(),
+//       pressed: i.boolean(),
+//     }),
+//   },
+// }
+
 const room = clientDB.room("touch", "main");
 
-type TouchPresence = {
-  x: number;
-  y: number;
-  pressed: boolean;
-};
+/* ------------------------------------------------------------------ */
+/*                          Peer circle view                           */
+/* ------------------------------------------------------------------ */
+
+function PeerCircle({ peer }: { peer: TouchPresence }) {
+  // animate grow / shrink based on peer.pressed
+  const scale = useSharedValue(peer.pressed ? 1 : 0);
+
+  useEffect(() => {
+    scale.value = withTiming(peer.pressed ? 1 : 0, { duration: 800 });
+  }, [peer.pressed]);
+
+  const style = useAnimatedStyle<ViewStyle>(() => ({
+    position: "absolute",
+    top: peer.y - 64,
+    left: peer.x - 64,
+    width: 128,
+    height: 128,
+    borderRadius: 64,
+    backgroundColor: "rgba(236,72,153,0.7)", // tailwind pink‑400 @ 70 %
+    transform: [{ scale: scale.value }],
+  }));
+
+  return <Animated.View style={style} />;
+}
+
+/* ------------------------------------------------------------------ */
+/*                              Screen                                */
+/* ------------------------------------------------------------------ */
 
 export default function Page() {
   const insets = useSafeAreaInsets();
 
-  const {
-    user: myPresence,
-    peers,
-    publishPresence,
-  } = clientDB.rooms.usePresence(room);
+  /* ---------------------------------------------------------------- */
+  /*         2. publish presence continuously with useSyncPresence    */
+  /* ---------------------------------------------------------------- */
+  const [myPresence, setMyPresence] = useState<TouchPresence>({
+    x: 0,
+    y: 0,
+    pressed: false,
+  });
+  clientDB.rooms.useSyncPresence(room, myPresence);
 
-  /* ----------------------------------------------------------------- */
-  /*               Shared values that drive every animation            */
-  /* ----------------------------------------------------------------- */
+  /* ---------------------------------------------------------------- */
+  /*              3. read everyone else with usePresence              */
+  /* ---------------------------------------------------------------- */
+  const { peers } = clientDB.rooms.usePresence(room, {
+    user: false, // we already track our own state in myPresence
+  });
+
+  /* ---------------------------------------------------------------- */
+  /*               Shared animated values for *my* circle             */
+  /* ---------------------------------------------------------------- */
   const circleScale = useSharedValue(0);
   const circleTop = useSharedValue(0);
   const circleLeft = useSharedValue(0);
@@ -55,10 +110,6 @@ export default function Page() {
       opacity: useSharedValue(0),
     }));
 
-  /* ----------------------------------------------------------------- */
-  /*                         Animated styles                           */
-  /* ----------------------------------------------------------------- */
-
   const circleStyle = useAnimatedStyle<ViewStyle>(() => ({
     top: circleTop.value,
     left: circleLeft.value,
@@ -66,93 +117,117 @@ export default function Page() {
     transform: [{ scale: circleScale.value }],
   }));
 
-  const heartStyles = hearts.map((heart) =>
+  const heartStyles = hearts.map((h) =>
     useAnimatedStyle<TextStyle>(() => ({
-      top: heart.top.value,
-      left: heart.left.value,
-      opacity: heart.opacity.value,
-      transform: [{ scale: heart.scale.value }],
+      top: h.top.value,
+      left: h.left.value,
+      opacity: h.opacity.value,
+      transform: [{ scale: h.scale.value }],
     }))
   );
 
-  /* ----------------------------------------------------------------- */
-  /*                            Animations                             */
-  /* ----------------------------------------------------------------- */
+  /* ---------------------------------------------------------------- */
+  /*                          Animations                              */
+  /* ---------------------------------------------------------------- */
+  const vibrate = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+  const RADIUS_HIT = 80;
 
-  const triggerHaptic = () =>
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+  const explodeHearts = (x: number, y: number) => {
+    hearts.forEach((h, idx) => {
+      const angle = (idx / hearts.length) * Math.PI * 2;
+      const dist = 150;
 
-  const animateHearts = (x: number, y: number) => {
-    hearts.forEach((heart, index) => {
-      const angle = (index / hearts.length) * Math.PI * 2;
-      const distance = 150;
+      // reset
+      h.scale.value = 0;
+      h.opacity.value = 0;
+      h.left.value = x - 16;
+      h.top.value = y - 16;
 
-      /* reset */
-      heart.scale.value = 0;
-      heart.opacity.value = 0;
-      heart.left.value = x - 16;
-      heart.top.value = y - 16;
-
-      /* scale & fade */
-      heart.scale.value = withSequence(
-        withDelay(index * 50, withSpring(1.2)),
+      // scale / fade
+      h.scale.value = withSequence(
+        withDelay(idx * 50, withSpring(1.2)),
         withDelay(300, withTiming(0, { duration: 300 }))
       );
-      heart.opacity.value = withSequence(
-        withDelay(index * 50, withTiming(1, { duration: 200 })),
+      h.opacity.value = withSequence(
+        withDelay(idx * 50, withTiming(1, { duration: 200 })),
         withDelay(300, withTiming(0, { duration: 300 }))
       );
 
-      /* radial move */
-      heart.left.value = withSequence(
-        withDelay(index * 50, withSpring(x + Math.cos(angle) * distance - 16))
+      // radial move
+      h.left.value = withSequence(
+        withDelay(idx * 50, withSpring(x + Math.cos(angle) * dist - 16))
       );
-      heart.top.value = withSequence(
-        withDelay(index * 50, withSpring(y + Math.sin(angle) * distance - 16))
+      h.top.value = withSequence(
+        withDelay(idx * 50, withSpring(y + Math.sin(angle) * dist - 16))
       );
     });
   };
 
-  /* ----------------------------------------------------------------- */
-  /*                     Touch‑event handlers                          */
-  /* ----------------------------------------------------------------- */
-
-  /** Convert absolute page coordinates to inside‑container coordinates */
+  /* ---------------------------------------------------------------- */
+  /*                       Touch event handlers                       */
+  /* ---------------------------------------------------------------- */
   const toLocal = (e: GestureResponderEvent) => ({
     x: e.nativeEvent.pageX - insets.left,
     y: e.nativeEvent.pageY - insets.top,
   });
 
+  const hitPeersRef = useRef<Set<string>>(new Set());
+
   const handlePressIn = (e: GestureResponderEvent) => {
     isPressed.value = true;
-
     const { x, y } = toLocal(e);
-    circleLeft.value = x - 64; //   center 128‑px circle
-    circleTop.value = y - 64;
 
+    circleLeft.value = x - 64;
+    circleTop.value = y - 64;
     circleScale.value = 0;
-    circleScale.value = withTiming(1, { duration: 800 }, () =>
-      runOnJS(triggerHaptic)()
-    );
+    circleScale.value = withTiming(1, { duration: 800 });
+
+    hitPeersRef.current.clear();
+    setMyPresence({ x, y, pressed: true });
   };
 
   const handleMove = (e: GestureResponderEvent) => {
     if (!isPressed.value) return;
+
     const { x, y } = toLocal(e);
     circleLeft.value = x - 64;
     circleTop.value = y - 64;
+    setMyPresence({ x, y, pressed: true });
+
+    // collision detection
+    Object.entries(peers).forEach(([peerId, peer]) => {
+      if (!peer.pressed) return;
+      const dx = peer.x - x;
+      const dy = peer.y - y;
+      const d2 = dx * dx + dy * dy;
+
+      if (d2 < RADIUS_HIT * RADIUS_HIT && !hitPeersRef.current.has(peerId)) {
+        hitPeersRef.current.add(peerId);
+        runOnJS(vibrate)();
+        runOnJS(explodeHearts)(x, y);
+      } else if (d2 >= RADIUS_HIT * RADIUS_HIT) {
+        hitPeersRef.current.delete(peerId);
+      }
+    });
   };
 
   const handlePressOut = () => {
     isPressed.value = false;
     circleScale.value = withTiming(0, { duration: 300 });
-    runOnJS(animateHearts)(circleLeft.value + 64, circleTop.value + 64);
+    setMyPresence((prev) => ({ ...prev, pressed: false }));
   };
 
-  /* ----------------------------------------------------------------- */
-  /*                               UI                                  */
-  /* ----------------------------------------------------------------- */
+  /* ---------------------------------------------------------------- */
+  /*                        Clean‑up on unmount                       */
+  /* ---------------------------------------------------------------- */
+  useEffect(
+    () => () => setMyPresence((prev) => ({ ...prev, pressed: false })),
+    []
+  );
 
+  /* ---------------------------------------------------------------- */
+  /*                               UI                                 */
+  /* ---------------------------------------------------------------- */
   return (
     <View
       className="flex flex-1 items-center justify-center"
@@ -164,25 +239,32 @@ export default function Page() {
       }}
     >
       <Pressable
-        className="w-full h-full items-center justify-center"
+        className="h-full w-full items-center justify-center"
         delayLongPress={200}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         onTouchMove={handleMove}
       >
-        {/* expanding circle */}
+        {/* my expanding circle */}
         <Animated.View
-          className="w-32 h-32 bg-pink-400 rounded-full absolute"
+          className="absolute h-32 w-32 rounded-full bg-pink-400"
           style={circleStyle}
         />
 
-        <Text className="text-black text-xl mb-4">Press and hold</Text>
+        {/* peer circles (everyone except me) */}
+        {Object.entries(peers).map(([id, peer]) =>
+          peer.pressed ? (
+            <PeerCircle key={id} peer={peer as TouchPresence} />
+          ) : null
+        )}
+
+        <Text className="mb-4 text-xl text-black">Press and hold</Text>
 
         {/* emoji hearts */}
         {hearts.map((_, i) => (
           <Animated.Text
             key={i}
-            className="text-3xl absolute"
+            className="absolute text-3xl"
             style={heartStyles[i]}
           >
             ❤️
