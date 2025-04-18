@@ -89,9 +89,11 @@ export default function Page() {
   /* ---------------------------------------------------------------- */
   /*              3. read everyone else with usePresence              */
   /* ---------------------------------------------------------------- */
-  const { peers } = clientDB.rooms.usePresence(room, {
+  const data = clientDB.rooms.usePresence(room, {
     user: false, // we already track our own state in myPresence
   });
+  const { peers } = data;
+  console.log("data", peers);
 
   /* ---------------------------------------------------------------- */
   /*               Shared animated values for *my* circle             */
