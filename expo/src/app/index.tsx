@@ -19,9 +19,24 @@ import Animated, {
   runOnJS,
 } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
+import clientDB from "@/clientDB";
+
+const room = clientDB.room("touch", "main");
+
+type TouchPresence = {
+  x: number;
+  y: number;
+  pressed: boolean;
+};
 
 export default function Page() {
   const insets = useSafeAreaInsets();
+
+  const {
+    user: myPresence,
+    peers,
+    publishPresence,
+  } = clientDB.rooms.usePresence(room);
 
   /* ----------------------------------------------------------------- */
   /*               Shared values that drive every animation            */
