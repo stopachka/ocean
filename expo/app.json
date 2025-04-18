@@ -15,6 +15,7 @@
       ]
     ],
     "name": "ocean",
-    "slug": "ocean"
+    "slug": "ocean",
+    "newArchEnabled": true
   }
 }
