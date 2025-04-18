@@ -2,166 +2,174 @@
 import React from "react";
 import {
   View,
-  Pressable,
   Text,
-  type GestureResponderEvent,
+  Pressable,
+  GestureResponderEvent,
+  type ViewStyle,
+  type TextStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
   withTiming,
   withSpring,
   withSequence,
   withDelay,
   runOnJS,
-  useSharedValue,
-  useAnimatedStyle,
-  type SharedValue,
 } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 
-// ---------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------
-const CIRCLE_DIAMETER = 128;
-const CIRCLE_RADIUS = CIRCLE_DIAMETER / 2;
-const HEART_COUNT = 8;
-const HEART_DISTANCE = 150;
-
-type Heart = {
-  x: SharedValue<number>;
-  y: SharedValue<number>;
-  scale: SharedValue<number>;
-  opacity: SharedValue<number>;
-};
-
-// ---------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------
 export default function Page() {
   const insets = useSafeAreaInsets();
 
-  /* ────────────────  Circle shared values  ──────────────── */
-  const circleX = useSharedValue(0);
-  const circleY = useSharedValue(0);
+  /* ----------------------------------------------------------------- */
+  /*               Shared values that drive every animation            */
+  /* ----------------------------------------------------------------- */
   const circleScale = useSharedValue(0);
+  const circleTop = useSharedValue(0);
+  const circleLeft = useSharedValue(0);
+  const isPressed = useSharedValue(false);
 
-  /* ────────────────  Heart shared values  ──────────────── */
-  const hearts: Heart[] = Array.from({ length: HEART_COUNT }).map(() => ({
-    x: useSharedValue(0),
-    y: useSharedValue(0),
-    scale: useSharedValue(0),
-    opacity: useSharedValue(0),
-  }));
+  const hearts = Array(8)
+    .fill(0)
+    .map(() => ({
+      top: useSharedValue(0),
+      left: useSharedValue(0),
+      scale: useSharedValue(0),
+      opacity: useSharedValue(0),
+    }));
 
-  /* ────────────────  Animated styles  ──────────────── */
-  const circleStyle = useAnimatedStyle(() => ({
-    position: "absolute",
-    left: circleX.value - CIRCLE_RADIUS,
-    top: circleY.value - CIRCLE_RADIUS,
-    width: CIRCLE_DIAMETER,
-    height: CIRCLE_DIAMETER,
-    borderRadius: CIRCLE_RADIUS,
-    backgroundColor: "#F472B6", // tailwind pink‑400
+  /* ----------------------------------------------------------------- */
+  /*                         Animated styles                           */
+  /* ----------------------------------------------------------------- */
+
+  const circleStyle = useAnimatedStyle<ViewStyle>(() => ({
+    top: circleTop.value,
+    left: circleLeft.value,
     opacity: circleScale.value * 0.7,
     transform: [{ scale: circleScale.value }],
   }));
 
   const heartStyles = hearts.map((heart) =>
-    useAnimatedStyle(() => ({
-      position: "absolute" as const,
-      left: heart.x.value - 16, // half of emoji ~32 px
-      top: heart.y.value - 16,
-      transform: [{ scale: heart.scale.value }],
+    useAnimatedStyle<TextStyle>(() => ({
+      top: heart.top.value,
+      left: heart.left.value,
       opacity: heart.opacity.value,
+      transform: [{ scale: heart.scale.value }],
     }))
   );
 
-  /* ────────────────  Haptics helper  ──────────────── */
+  /* ----------------------------------------------------------------- */
+  /*                            Animations                             */
+  /* ----------------------------------------------------------------- */
+
   const triggerHaptic = () =>
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
-  /* ────────────────  Heart explosion  ──────────────── */
-  const explodeHearts = (cx: number, cy: number) => {
-    hearts.forEach((heart, i) => {
-      const angle = (i / HEART_COUNT) * Math.PI * 2; // full circle
-      const dx = Math.cos(angle) * HEART_DISTANCE;
-      const dy = Math.sin(angle) * HEART_DISTANCE;
+  const animateHearts = (x: number, y: number) => {
+    hearts.forEach((heart, index) => {
+      const angle = (index / hearts.length) * Math.PI * 2;
+      const distance = 150;
 
-      // reset start position (centre of circle)
-      heart.x.value = cx;
-      heart.y.value = cy;
+      /* reset */
       heart.scale.value = 0;
       heart.opacity.value = 0;
+      heart.left.value = x - 16;
+      heart.top.value = y - 16;
 
-      // animate
+      /* scale & fade */
       heart.scale.value = withSequence(
-        withDelay(i * 50, withSpring(1.2)),
+        withDelay(index * 50, withSpring(1.2)),
         withDelay(300, withTiming(0, { duration: 300 }))
       );
-
       heart.opacity.value = withSequence(
-        withDelay(i * 50, withTiming(1, { duration: 200 })),
+        withDelay(index * 50, withTiming(1, { duration: 200 })),
         withDelay(300, withTiming(0, { duration: 300 }))
       );
 
-      heart.x.value = withDelay(i * 50, withSpring(cx + dx));
-      heart.y.value = withDelay(i * 50, withSpring(cy + dy));
+      /* radial move */
+      heart.left.value = withSequence(
+        withDelay(index * 50, withSpring(x + Math.cos(angle) * distance - 16))
+      );
+      heart.top.value = withSequence(
+        withDelay(index * 50, withSpring(y + Math.sin(angle) * distance - 16))
+      );
     });
   };
 
-  /* ────────────────  Touch handlers  ──────────────── */
+  /* ----------------------------------------------------------------- */
+  /*                     Touch‑event handlers                          */
+  /* ----------------------------------------------------------------- */
+
+  /** Convert absolute page coordinates to inside‑container coordinates */
+  const toLocal = (e: GestureResponderEvent) => ({
+    x: e.nativeEvent.pageX - insets.left,
+    y: e.nativeEvent.pageY - insets.top,
+  });
+
   const handlePressIn = (e: GestureResponderEvent) => {
-    const { locationX, locationY } = e.nativeEvent;
+    isPressed.value = true;
 
-    circleX.value = locationX;
-    circleY.value = locationY;
+    const { x, y } = toLocal(e);
+    circleLeft.value = x - 64; //   center 128‑px circle
+    circleTop.value = y - 64;
+
     circleScale.value = 0;
-
     circleScale.value = withTiming(1, { duration: 800 }, () =>
       runOnJS(triggerHaptic)()
     );
   };
 
   const handleMove = (e: GestureResponderEvent) => {
-    const { locationX, locationY } = e.nativeEvent;
-    circleX.value = locationX;
-    circleY.value = locationY;
+    if (!isPressed.value) return;
+    const { x, y } = toLocal(e);
+    circleLeft.value = x - 64;
+    circleTop.value = y - 64;
   };
 
   const handlePressOut = () => {
-    const cx = circleX.value;
-    const cy = circleY.value;
-
+    isPressed.value = false;
     circleScale.value = withTiming(0, { duration: 300 });
-    runOnJS(explodeHearts)(cx, cy);
+    runOnJS(animateHearts)(circleLeft.value + 64, circleTop.value + 64);
   };
 
-  /* ────────────────  Render  ──────────────── */
+  /* ----------------------------------------------------------------- */
+  /*                               UI                                  */
+  /* ----------------------------------------------------------------- */
+
   return (
     <View
-      className="flex-1 items-center justify-center"
+      className="flex flex-1 items-center justify-center"
       style={{
         paddingTop: insets.top,
-        paddingBottom: insets.bottom,
         paddingLeft: insets.left,
         paddingRight: insets.right,
+        paddingBottom: insets.bottom,
       }}
     >
       <Pressable
         className="w-full h-full items-center justify-center"
         delayLongPress={200}
         onPressIn={handlePressIn}
-        onTouchMove={handleMove}
         onPressOut={handlePressOut}
+        onTouchMove={handleMove}
       >
-        {/* Expanding circle */}
-        <Animated.View style={circleStyle} />
+        {/* expanding circle */}
+        <Animated.View
+          className="w-32 h-32 bg-pink-400 rounded-full absolute"
+          style={circleStyle}
+        />
 
         <Text className="text-black text-xl mb-4">Press and hold</Text>
 
-        {/* Exploding hearts */}
+        {/* emoji hearts */}
         {hearts.map((_, i) => (
-          <Animated.Text key={i} style={heartStyles[i]} className="text-3xl">
+          <Animated.Text
+            key={i}
+            className="text-3xl absolute"
+            style={heartStyles[i]}
+          >
             ❤️
           </Animated.Text>
         ))}
