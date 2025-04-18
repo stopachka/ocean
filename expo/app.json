@@ -1,5 +1,6 @@
 {
   "expo": {
+    "icon": "./assets/images/icon.png",
     "ios": {
       "bundleIdentifier": "com.stopachka.ocean",
       "infoPlist": {
