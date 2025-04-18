@@ -1,5 +1,11 @@
 {
   "expo": {
+    "ios": {
+      "bundleIdentifier": "com.stopachka.ocean",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
     "scheme": "acme",
     "userInterfaceStyle": "automatic",
     "orientation": "default",
@@ -16,6 +22,15 @@
     ],
     "name": "ocean",
     "slug": "ocean",
-    "newArchEnabled": true
+    "newArchEnabled": true,
+    "extra": {
+      "router": {
+        "origin": "https://n"
+      },
+      "eas": {
+        "projectId": "e17c2687-c9fc-448d-9277-4e23fb70b477"
+      }
+    },
+    "owner": "stopachka"
   }
 }
