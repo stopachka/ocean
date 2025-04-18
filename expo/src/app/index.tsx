@@ -29,18 +29,6 @@ import clientDB from "@/clientDB";
 
 type TouchPresence = { x: number; y: number; pressed: boolean };
 
-// make sure `instant.schema.ts` has:
-//
-// rooms: {
-//   touch: {
-//     presence: i.entity({
-//       x: i.number(),
-//       y: i.number(),
-//       pressed: i.boolean(),
-//     }),
-//   },
-// }
-
 const room = clientDB.room("touch", "main");
 
 /* ------------------------------------------------------------------ */
@@ -48,7 +36,6 @@ const room = clientDB.room("touch", "main");
 /* ------------------------------------------------------------------ */
 
 function PeerCircle({ peer }: { peer: TouchPresence }) {
-  // animate grow / shrink based on peer.pressed
   const scale = useSharedValue(peer.pressed ? 1 : 0);
 
   useEffect(() => {
@@ -62,7 +49,7 @@ function PeerCircle({ peer }: { peer: TouchPresence }) {
     width: 128,
     height: 128,
     borderRadius: 64,
-    backgroundColor: "rgba(236,72,153,0.7)", // tailwind pink‑400 @ 70 %
+    backgroundColor: "rgba(236,72,153,0.7)",
     transform: [{ scale: scale.value }],
   }));
 
@@ -76,9 +63,7 @@ function PeerCircle({ peer }: { peer: TouchPresence }) {
 export default function Page() {
   const insets = useSafeAreaInsets();
 
-  /* ---------------------------------------------------------------- */
-  /*         2. publish presence continuously with useSyncPresence    */
-  /* ---------------------------------------------------------------- */
+  /* publish presence with useSyncPresence */
   const [myPresence, setMyPresence] = useState<TouchPresence>({
     x: 0,
     y: 0,
@@ -86,17 +71,13 @@ export default function Page() {
   });
   clientDB.rooms.useSyncPresence(room, myPresence);
 
-  /* ---------------------------------------------------------------- */
-  /*              3. read everyone else with usePresence              */
-  /* ---------------------------------------------------------------- */
-  const data = clientDB.rooms.usePresence(room, {
-    user: false, // we already track our own state in myPresence
+  /* read peers with usePresence */
+  const { peers } = clientDB.rooms.usePresence(room, {
+    user: false,
   });
-  const { peers } = data;
-  console.log("data", peers);
 
   /* ---------------------------------------------------------------- */
-  /*               Shared animated values for *my* circle             */
+  /*               Animated values for *my* circle                    */
   /* ---------------------------------------------------------------- */
   const circleScale = useSharedValue(0);
   const circleTop = useSharedValue(0);
@@ -139,13 +120,11 @@ export default function Page() {
       const angle = (idx / hearts.length) * Math.PI * 2;
       const dist = 150;
 
-      // reset
       h.scale.value = 0;
       h.opacity.value = 0;
       h.left.value = x - 16;
       h.top.value = y - 16;
 
-      // scale / fade
       h.scale.value = withSequence(
         withDelay(idx * 50, withSpring(1.2)),
         withDelay(300, withTiming(0, { duration: 300 }))
@@ -155,7 +134,6 @@ export default function Page() {
         withDelay(300, withTiming(0, { duration: 300 }))
       );
 
-      // radial move
       h.left.value = withSequence(
         withDelay(idx * 50, withSpring(x + Math.cos(angle) * dist - 16))
       );
@@ -196,7 +174,7 @@ export default function Page() {
     circleTop.value = y - 64;
     setMyPresence({ x, y, pressed: true });
 
-    // collision detection
+    // collision detection while **I** move
     Object.entries(peers).forEach(([peerId, peer]) => {
       if (!peer.pressed) return;
       const dx = peer.x - x;
@@ -218,6 +196,28 @@ export default function Page() {
     circleScale.value = withTiming(0, { duration: 300 });
     setMyPresence((prev) => ({ ...prev, pressed: false }));
   };
+
+  /* ---------------------------------------------------------------- */
+  /*      NEW: collision detection when **peers** move over me        */
+  /* ---------------------------------------------------------------- */
+  useEffect(() => {
+    if (!myPresence.pressed) return;
+
+    Object.entries(peers).forEach(([peerId, peer]) => {
+      if (!peer.pressed) return;
+      const dx = peer.x - myPresence.x;
+      const dy = peer.y - myPresence.y;
+      const d2 = dx * dx + dy * dy;
+
+      if (d2 < RADIUS_HIT * RADIUS_HIT && !hitPeersRef.current.has(peerId)) {
+        hitPeersRef.current.add(peerId);
+        vibrate();
+        explodeHearts(myPresence.x, myPresence.y);
+      } else if (d2 >= RADIUS_HIT * RADIUS_HIT) {
+        hitPeersRef.current.delete(peerId);
+      }
+    });
+  }, [peers, myPresence]); // <‑‑ runs whenever anyone’s position changes
 
   /* ---------------------------------------------------------------- */
   /*                        Clean‑up on unmount                       */
@@ -253,7 +253,7 @@ export default function Page() {
           style={circleStyle}
         />
 
-        {/* peer circles (everyone except me) */}
+        {/* peer circles */}
         {Object.entries(peers).map(([id, peer]) =>
           peer.pressed ? (
             <PeerCircle key={id} peer={peer as TouchPresence} />
